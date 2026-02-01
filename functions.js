@@ -180,7 +180,9 @@ async function postToSlack(review, context) {
 }
 
 // Post summary header to Slack
-async function postSummaryHeader(newReviewCount, context) {
+async function postSummaryHeader(newReviewCount, appId, context) {
+    const appStoreConnectUrl = `https://appstoreconnect.apple.com/apps/${appId}/appstore/activity/ios/ratingsResponses`;
+    
     const message = {
         blocks: [
             {
@@ -192,13 +194,11 @@ async function postSummaryHeader(newReviewCount, context) {
                 }
             },
             {
-                type: 'context',
-                elements: [
-                    {
-                        type: 'mrkdwn',
-                        text: `*${APP_BUNDLE_ID}* • ${new Date().toLocaleDateString()}`
-                    }
-                ]
+                type: 'section',
+                text: {
+                    type: 'mrkdwn',
+                    text: `<${appStoreConnectUrl}|View in App Store Connect →>`
+                }
             },
             { type: 'divider' }
         ]
@@ -275,7 +275,7 @@ async function checkAndPostReviews(context, options = {}) {
     }
 
     // Post header
-    await postSummaryHeader(newReviews.length, context);
+    await postSummaryHeader(newReviews.length, appId, context);
 
     // Post each review (newest last so they appear in order)
     const sortedReviews = newReviews.sort((a, b) => 
@@ -414,6 +414,58 @@ app.http('testAppStore', {
                 status: 500, 
                 body: `Error: ${error.message}` 
             };
+        }
+    }
+});
+
+// HTTP Trigger: Reset most recent review so it can be posted again
+app.http('resetLatest', {
+    methods: ['GET', 'POST'],
+    authLevel: 'anonymous',
+    handler: async (request, context) => {
+        try {
+            if (!AZURE_STORAGE_ACCOUNT || !AZURE_STORAGE_KEY) {
+                return { status: 500, body: 'Azure Storage not configured' };
+            }
+
+            // Generate token and get app ID
+            const token = generateToken();
+            const appId = await getAppId(token, context);
+
+            // Fetch reviews to find the most recent
+            const reviews = await fetchReviews(token, appId, context);
+            const sortedReviews = reviews.sort((a, b) => 
+                new Date(b.attributes.createdDate) - new Date(a.attributes.createdDate)
+            );
+            const latestReview = sortedReviews[0];
+
+            if (!latestReview) {
+                return { status: 200, jsonBody: { message: 'No reviews found' } };
+            }
+
+            // Delete from table
+            const tableClient = getTableClient();
+            try {
+                await tableClient.deleteEntity('reviews', latestReview.id);
+                context.log(`Deleted review ${latestReview.id} from posted list`);
+            } catch (e) {
+                // Already not in table
+            }
+
+            return { 
+                status: 200, 
+                jsonBody: { 
+                    message: 'Reset most recent review',
+                    review: {
+                        id: latestReview.id,
+                        title: latestReview.attributes.title,
+                        rating: latestReview.attributes.rating
+                    }
+                }
+            };
+        } catch (error) {
+            context.log('Error in resetLatest:', error.message);
+            return { status: 500, body: `Error: ${error.message}` };
         }
     }
 });
