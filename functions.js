@@ -417,3 +417,67 @@ app.http('testAppStore', {
         }
     }
 });
+
+// HTTP Trigger: Mark all reviews as posted (except the most recent one)
+app.http('markAllPosted', {
+    methods: ['POST'],
+    authLevel: 'anonymous',
+    handler: async (request, context) => {
+        try {
+            context.log('Marking all reviews as posted (except most recent)...');
+
+            // Generate token and get app ID
+            const token = generateToken();
+            const appId = await getAppId(token, context);
+
+            // Fetch reviews
+            const reviews = await fetchReviews(token, appId, context);
+            context.log(`Fetched ${reviews.length} reviews`);
+
+            if (reviews.length === 0) {
+                return { status: 200, jsonBody: { message: 'No reviews found', marked: 0 } };
+            }
+
+            // Sort by date (newest first) and skip the most recent one
+            const sortedReviews = reviews.sort((a, b) => 
+                new Date(b.attributes.createdDate) - new Date(a.attributes.createdDate)
+            );
+            const reviewsToMark = sortedReviews.slice(1); // Skip first (most recent)
+
+            // Get table client
+            if (!AZURE_STORAGE_ACCOUNT || !AZURE_STORAGE_KEY) {
+                return { status: 500, body: 'Azure Storage not configured' };
+            }
+
+            const tableClient = getTableClient();
+            await tableClient.createTable().catch(() => {});
+
+            // Mark all as posted
+            let markedCount = 0;
+            for (const review of reviewsToMark) {
+                await markReviewPosted(tableClient, review);
+                markedCount++;
+            }
+
+            const skippedReview = sortedReviews[0];
+            context.log(`Marked ${markedCount} reviews as posted, skipped most recent: ${skippedReview.id}`);
+
+            return { 
+                status: 200, 
+                jsonBody: { 
+                    message: `Marked ${markedCount} reviews as posted`,
+                    marked: markedCount,
+                    skipped: {
+                        id: skippedReview.id,
+                        title: skippedReview.attributes.title,
+                        rating: skippedReview.attributes.rating,
+                        createdDate: skippedReview.attributes.createdDate
+                    }
+                }
+            };
+        } catch (error) {
+            context.log('Error in markAllPosted:', error.message);
+            return { status: 500, body: `Error: ${error.message}` };
+        }
+    }
+});
