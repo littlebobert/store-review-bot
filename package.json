@@ -1,0 +1,15 @@
+{
+  "name": "store-review-bot",
+  "version": "1.0.0",
+  "description": "App Store review bot that posts new reviews to Slack daily using Azure Functions",
+  "main": "functions.js",
+  "scripts": {
+    "start": "func start",
+    "test": "echo \"No tests yet\""
+  },
+  "dependencies": {
+    "@azure/data-tables": "^13.2.2",
+    "@azure/functions": "^4.5.0",
+    "jsonwebtoken": "^9.0.2"
+  }
+}
