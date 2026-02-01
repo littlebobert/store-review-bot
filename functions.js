@@ -136,62 +136,27 @@ function formatStars(rating) {
 }
 
 // Post review to Slack
-async function postToSlack(review, context) {
+async function postToSlack(review, appId, context) {
     const { rating, title, body, reviewerNickname, territory, createdDate } = review.attributes;
-    
-    // Color based on rating
-    const color = rating >= 4 ? '#36a64f' : rating >= 3 ? '#daa038' : '#dc3545';
-    
-    const message = {
-        attachments: [
-            {
-                color: color,
-                blocks: [
-                    {
-                        type: 'section',
-                        text: {
-                            type: 'mrkdwn',
-                            text: `*${formatStars(rating)}* ${rating}/5\n${title ? `*${title}*\n` : ''}${body || '_No review text_'}`
-                        }
-                    },
-                    {
-                        type: 'context',
-                        elements: [
-                            {
-                                type: 'mrkdwn',
-                                text: `👤 ${reviewerNickname || 'Anonymous'} • 🌍 ${territory || 'Unknown'} • 📅 ${new Date(createdDate).toLocaleDateString()}`
-                            }
-                        ]
-                    }
-                ]
-            }
-        ]
-    };
-
-    const response = await fetch(SLACK_WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(message)
-    });
-
-    if (!response.ok) {
-        throw new Error(`Slack webhook failed: ${response.status}`);
-    }
-}
-
-// Post summary header to Slack
-async function postSummaryHeader(newReviewCount, appId, context) {
     const appStoreConnectUrl = `https://appstoreconnect.apple.com/apps/${appId}/appstore/activity/ios/ratingsResponses`;
     
     const message = {
         blocks: [
             {
-                type: 'header',
+                type: 'section',
                 text: {
-                    type: 'plain_text',
-                    text: `📱 ${newReviewCount} New App Store Review${newReviewCount === 1 ? '' : 's'}`,
-                    emoji: true
+                    type: 'mrkdwn',
+                    text: `*${formatStars(rating)}* ${rating}/5\n${title ? `*${title}*\n` : ''}${body || '_No review text_'}`
                 }
+            },
+            {
+                type: 'context',
+                elements: [
+                    {
+                        type: 'mrkdwn',
+                        text: `👤 ${reviewerNickname || 'Anonymous'} • 🌍 ${territory || 'Unknown'} • 📅 ${new Date(createdDate).toLocaleDateString()}`
+                    }
+                ]
             },
             {
                 type: 'section',
@@ -199,8 +164,7 @@ async function postSummaryHeader(newReviewCount, appId, context) {
                     type: 'mrkdwn',
                     text: `<${appStoreConnectUrl}|View in App Store Connect →>`
                 }
-            },
-            { type: 'divider' }
+            }
         ]
     };
 
@@ -274,16 +238,13 @@ async function checkAndPostReviews(context, options = {}) {
         return { message: 'No new reviews to post', reviewCount: 0 };
     }
 
-    // Post header
-    await postSummaryHeader(newReviews.length, appId, context);
-
     // Post each review (newest last so they appear in order)
     const sortedReviews = newReviews.sort((a, b) => 
         new Date(a.attributes.createdDate) - new Date(b.attributes.createdDate)
     );
 
     for (const review of sortedReviews) {
-        await postToSlack(review, context);
+        await postToSlack(review, appId, context);
         
         // Mark as posted
         if (tableClient) {
