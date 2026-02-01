@@ -138,32 +138,40 @@ function formatStars(rating) {
 // Post review to Slack
 async function postToSlack(review, appId, context) {
     const { rating, title, body, reviewerNickname, territory, createdDate } = review.attributes;
-    const appStoreConnectUrl = `https://appstoreconnect.apple.com/apps/${appId}/appstore/activity/ios/ratingsResponses`;
+    const appStoreConnectUrl = `https://appstoreconnect.apple.com/apps/${appId}/distribution/ratings/ios`;
+    
+    // Color based on rating
+    const color = rating >= 4 ? '#36a64f' : rating >= 3 ? '#daa038' : '#dc3545';
     
     const message = {
-        blocks: [
+        attachments: [
             {
-                type: 'section',
-                text: {
-                    type: 'mrkdwn',
-                    text: `*${formatStars(rating)}* ${rating}/5\n${title ? `*${title}*\n` : ''}${body || '_No review text_'}`
-                }
-            },
-            {
-                type: 'context',
-                elements: [
+                color: color,
+                blocks: [
                     {
-                        type: 'mrkdwn',
-                        text: `👤 ${reviewerNickname || 'Anonymous'} • 🌍 ${territory || 'Unknown'} • 📅 ${new Date(createdDate).toLocaleDateString()}`
+                        type: 'section',
+                        text: {
+                            type: 'mrkdwn',
+                            text: `*${formatStars(rating)}* ${rating}/5\n${title ? `*${title}*\n` : ''}${body || '_No review text_'}`
+                        }
+                    },
+                    {
+                        type: 'context',
+                        elements: [
+                            {
+                                type: 'mrkdwn',
+                                text: `👤 ${reviewerNickname || 'Anonymous'} • 🌍 ${territory || 'Unknown'} • 📅 ${new Date(createdDate).toLocaleDateString()}`
+                            }
+                        ]
+                    },
+                    {
+                        type: 'section',
+                        text: {
+                            type: 'mrkdwn',
+                            text: `<${appStoreConnectUrl}|View in App Store Connect →>`
+                        }
                     }
                 ]
-            },
-            {
-                type: 'section',
-                text: {
-                    type: 'mrkdwn',
-                    text: `<${appStoreConnectUrl}|View in App Store Connect →>`
-                }
             }
         ]
     };
