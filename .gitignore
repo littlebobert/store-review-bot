@@ -1,0 +1,24 @@
+# Azure Functions
+bin
+obj
+csx
+.vs
+edge
+Publish
+.vscode
+
+# Dependencies
+node_modules/
+
+# Local settings (contains secrets)
+local.settings.json
+
+# Private keys
+*.p8
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

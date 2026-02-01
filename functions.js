@@ -420,7 +420,7 @@ app.http('testAppStore', {
 
 // HTTP Trigger: Mark all reviews as posted (except the most recent one)
 app.http('markAllPosted', {
-    methods: ['POST'],
+    methods: ['GET', 'POST'],
     authLevel: 'anonymous',
     handler: async (request, context) => {
         try {
