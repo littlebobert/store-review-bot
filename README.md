@@ -21,6 +21,8 @@ Edit `local.settings.json` with your credentials:
     "APP_STORE_ISSUER_ID": "12345678-1234-1234-1234-123456789012",
     "APP_STORE_PRIVATE_KEY": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----",
     "APP_ID": "jp.tech.kotoba.app",
+    "GOOGLE_PLAY_PACKAGE_NAME": "com.example.app",
+    "GOOGLE_SERVICE_ACCOUNT_JSON": "{\"type\":\"service_account\",\"project_id\":\"...\"}",
     "SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/...",
     "AZURE_STORAGE_ACCOUNT": "yourstorageaccount",
     "AZURE_STORAGE_KEY": "your_storage_key"
@@ -49,6 +51,9 @@ npm start
 - **Test App Store API:** http://localhost:7071/api/testAppStore
 - **Preview reviews:** http://localhost:7071/api/previewReviews
 - **Trigger review post:** http://localhost:7071/api/triggerReviewCheck
+- **Test Google Play API:** http://localhost:7071/api/testGooglePlay
+- **Preview Google Play reviews:** http://localhost:7071/api/previewGoogleReviews
+- **Trigger Google Play review post:** http://localhost:7071/api/triggerGoogleReviewCheck
 
 ## Endpoints
 
@@ -58,6 +63,9 @@ npm start
 | `/api/testAppStore` | GET | Verify App Store Connect API credentials |
 | `/api/previewReviews` | GET | Fetch and preview reviews (doesn't post) |
 | `/api/triggerReviewCheck` | GET/POST | Fetch and post new reviews to Slack |
+| `/api/testGooglePlay` | GET | Verify Google Play Developer API credentials |
+| `/api/previewGoogleReviews` | GET | Fetch and preview Google Play reviews (doesn't post) |
+| `/api/triggerGoogleReviewCheck` | GET/POST | Fetch and post new Google Play reviews to Slack |
 
 ## Scheduled Run
 
@@ -96,6 +104,8 @@ func azure functionapp publish store-review-bot
 # - APP_STORE_ISSUER_ID
 # - APP_STORE_PRIVATE_KEY
 # - APP_ID
+# - GOOGLE_PLAY_PACKAGE_NAME
+# - GOOGLE_SERVICE_ACCOUNT_JSON
 # - SLACK_WEBHOOK_URL
 # - AZURE_STORAGE_ACCOUNT
 # - AZURE_STORAGE_KEY

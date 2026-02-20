@@ -10,6 +10,7 @@
   "dependencies": {
     "@azure/data-tables": "^13.2.2",
     "@azure/functions": "^4.5.0",
+    "googleapis": "^171.4.0",
     "jsonwebtoken": "^9.0.2"
   }
 }

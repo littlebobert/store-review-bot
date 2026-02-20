@@ -1,12 +1,15 @@
 const { app } = require('@azure/functions');
 const { TableClient, AzureNamedKeyCredential } = require('@azure/data-tables');
 const jwt = require('jsonwebtoken');
+const { google } = require('googleapis');
 
 // Configuration
 const APP_STORE_KEY_ID = process.env.APP_STORE_KEY_ID;
 const APP_STORE_ISSUER_ID = process.env.APP_STORE_ISSUER_ID;
 const APP_STORE_PRIVATE_KEY = process.env.APP_STORE_PRIVATE_KEY;
 const APP_BUNDLE_ID = process.env.APP_ID; // e.g., jp.tech.kotoba.app
+const GOOGLE_PLAY_PACKAGE_NAME = process.env.GOOGLE_PLAY_PACKAGE_NAME; // e.g., com.example.app
+const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 const AZURE_STORAGE_ACCOUNT = process.env.AZURE_STORAGE_ACCOUNT;
 const AZURE_STORAGE_KEY = process.env.AZURE_STORAGE_KEY;
@@ -135,10 +138,83 @@ function formatStars(rating) {
     return filled + empty;
 }
 
+function parseGoogleServiceAccountJson() {
+    if (!GOOGLE_SERVICE_ACCOUNT_JSON) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(GOOGLE_SERVICE_ACCOUNT_JSON);
+    } catch (error) {
+        throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON');
+    }
+}
+
+async function fetchGooglePlayReviews(context) {
+    if (!GOOGLE_PLAY_PACKAGE_NAME) {
+        throw new Error('GOOGLE_PLAY_PACKAGE_NAME is not configured');
+    }
+
+    const serviceAccount = parseGoogleServiceAccountJson();
+    if (!serviceAccount) {
+        throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not configured');
+    }
+
+    const auth = new google.auth.GoogleAuth({
+        credentials: serviceAccount,
+        scopes: ['https://www.googleapis.com/auth/androidpublisher']
+    });
+    const authClient = await auth.getClient();
+    const androidpublisher = google.androidpublisher({
+        version: 'v3',
+        auth: authClient
+    });
+
+    const reviews = [];
+    let token;
+
+    do {
+        const response = await androidpublisher.reviews.list({
+            packageName: GOOGLE_PLAY_PACKAGE_NAME,
+            maxResults: 100,
+            token
+        });
+
+        const pageReviews = response.data.reviews || [];
+        reviews.push(...pageReviews);
+        token = response.data.tokenPagination?.nextPageToken;
+    } while (token && reviews.length < 100);
+
+    return reviews;
+}
+
+function mapGoogleReview(googleReview) {
+    const userComment = (googleReview.comments || [])
+        .map((comment) => comment.userComment)
+        .filter(Boolean)
+        .pop();
+
+    const modifiedSeconds = Number(userComment?.lastModified?.seconds || 0);
+    const createdDate = modifiedSeconds
+        ? new Date(modifiedSeconds * 1000).toISOString()
+        : new Date().toISOString();
+
+    return {
+        id: `google:${googleReview.reviewId}`,
+        attributes: {
+            rating: userComment?.starRating || 0,
+            title: '',
+            body: userComment?.text || '',
+            reviewerNickname: 'Google Play User',
+            territory: userComment?.reviewerLanguage || '',
+            createdDate
+        }
+    };
+}
+
 // Post review to Slack
-async function postToSlack(review, appId, context) {
+async function postToSlack(review, reviewUrl) {
     const { rating, title, body, reviewerNickname, territory, createdDate } = review.attributes;
-    const appStoreConnectUrl = `https://appstoreconnect.apple.com/apps/${appId}/distribution/ratings/ios`;
     
     // Color based on rating
     const color = rating >= 4 ? '#36a64f' : rating >= 3 ? '#daa038' : '#dc3545';
@@ -168,7 +244,7 @@ async function postToSlack(review, appId, context) {
                         type: 'section',
                         text: {
                             type: 'mrkdwn',
-                            text: `<${appStoreConnectUrl}|View in App Store Connect →>`
+                            text: `<${reviewUrl}|View review source →>`
                         }
                     }
                 ]
@@ -200,6 +276,7 @@ async function checkAndPostReviews(context, options = {}) {
     // Get app ID from bundle ID
     const appId = await getAppId(token, context);
     context.log(`Found app ID: ${appId} for bundle ID: ${APP_BUNDLE_ID}`);
+    const appStoreConnectUrl = `https://appstoreconnect.apple.com/apps/${appId}/distribution/ratings/ios`;
 
     // Fetch reviews
     const reviews = await fetchReviews(token, appId, context);
@@ -252,7 +329,7 @@ async function checkAndPostReviews(context, options = {}) {
     );
 
     for (const review of sortedReviews) {
-        await postToSlack(review, appId, context);
+        await postToSlack(review, appStoreConnectUrl);
         
         // Mark as posted
         if (tableClient) {
@@ -268,13 +345,88 @@ async function checkAndPostReviews(context, options = {}) {
     return { message: `Posted ${newReviews.length} new reviews`, reviewCount: newReviews.length };
 }
 
+// Main function to check for new Google Play reviews and post them
+async function checkAndPostGoogleReviews(context, options = {}) {
+    const { preview = false, forcePost = false } = options;
+    context.log('Starting Google Play review check...');
+
+    const googleReviews = await fetchGooglePlayReviews(context);
+    const reviews = googleReviews.map(mapGoogleReview);
+    context.log(`Fetched ${reviews.length} Google Play reviews`);
+
+    if (preview) {
+        return reviews.map(r => ({
+            id: r.id,
+            rating: r.attributes.rating,
+            title: r.attributes.title,
+            body: r.attributes.body,
+            reviewer: r.attributes.reviewerNickname,
+            territory: r.attributes.territory,
+            createdDate: r.attributes.createdDate
+        }));
+    }
+
+    // Get table client for tracking posted reviews
+    let tableClient = null;
+    if (AZURE_STORAGE_ACCOUNT && AZURE_STORAGE_KEY) {
+        tableClient = getTableClient();
+        await tableClient.createTable().catch(() => {}); // Ignore if exists
+    } else {
+        context.log('Warning: Azure Storage not configured - all Google Play reviews will be posted');
+    }
+
+    // Filter to only new reviews
+    const newReviews = [];
+    for (const review of reviews) {
+        if (tableClient && !forcePost) {
+            const alreadyPosted = await isReviewPosted(tableClient, review.id);
+            if (!alreadyPosted) {
+                newReviews.push(review);
+            }
+        } else {
+            newReviews.push(review);
+        }
+    }
+
+    context.log(`Found ${newReviews.length} new Google Play reviews to post`);
+
+    if (newReviews.length === 0) {
+        return { message: 'No new Google Play reviews to post', reviewCount: 0 };
+    }
+
+    const sortedReviews = newReviews.sort((a, b) =>
+        new Date(a.attributes.createdDate) - new Date(b.attributes.createdDate)
+    );
+    const googlePlayReviewUrl = `https://play.google.com/store/apps/details?id=${GOOGLE_PLAY_PACKAGE_NAME}&showAllReviews=true`;
+
+    for (const review of sortedReviews) {
+        await postToSlack(review, googlePlayReviewUrl);
+
+        if (tableClient) {
+            await markReviewPosted(tableClient, review);
+        }
+
+        context.log(`Posted Google Play review: ${review.id}`);
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    return { message: `Posted ${newReviews.length} new Google Play reviews`, reviewCount: newReviews.length };
+}
+
 // Timer Trigger: Runs daily at 9am JST (0:00 UTC)
 app.timer('dailyReviewCheck', {
     schedule: '0 0 0 * * *',
     handler: async (timer, context) => {
         try {
-            const result = await checkAndPostReviews(context);
-            context.log('Daily review check completed:', result);
+            const appStoreResult = await checkAndPostReviews(context);
+            context.log('Daily App Store review check completed:', appStoreResult);
+
+            if (GOOGLE_PLAY_PACKAGE_NAME && GOOGLE_SERVICE_ACCOUNT_JSON) {
+                const googlePlayResult = await checkAndPostGoogleReviews(context);
+                context.log('Daily Google Play review check completed:', googlePlayResult);
+            } else {
+                context.log('Google Play not configured, skipping daily Google Play review check');
+            }
         } catch (error) {
             context.log('Error in daily review check:', error.message);
             throw error;
@@ -322,6 +474,51 @@ app.http('previewReviews', {
             return { 
                 status: 500, 
                 body: `Error: ${error.message}` 
+            };
+        }
+    }
+});
+
+// HTTP Trigger: Preview Google Play reviews without posting
+app.http('previewGoogleReviews', {
+    methods: ['GET'],
+    authLevel: 'anonymous',
+    handler: async (request, context) => {
+        try {
+            const reviews = await checkAndPostGoogleReviews(context, { preview: true });
+            return {
+                status: 200,
+                jsonBody: {
+                    count: reviews.length,
+                    reviews: reviews
+                }
+            };
+        } catch (error) {
+            context.log('Error in previewGoogleReviews:', error.message);
+            return {
+                status: 500,
+                body: `Error: ${error.message}`
+            };
+        }
+    }
+});
+
+// HTTP Trigger: Manually trigger Google Play review check
+app.http('triggerGoogleReviewCheck', {
+    methods: ['GET', 'POST'],
+    authLevel: 'anonymous',
+    handler: async (request, context) => {
+        try {
+            const result = await checkAndPostGoogleReviews(context);
+            return {
+                status: 200,
+                jsonBody: result
+            };
+        } catch (error) {
+            context.log('Error in triggerGoogleReviewCheck:', error.message);
+            return {
+                status: 500,
+                body: `Error: ${error.message}`
             };
         }
     }
@@ -382,6 +579,31 @@ app.http('testAppStore', {
             return { 
                 status: 500, 
                 body: `Error: ${error.message}` 
+            };
+        }
+    }
+});
+
+// HTTP Trigger: Test Google Play Developer API connection
+app.http('testGooglePlay', {
+    methods: ['GET'],
+    authLevel: 'anonymous',
+    handler: async (request, context) => {
+        try {
+            const reviews = await fetchGooglePlayReviews(context);
+            return {
+                status: 200,
+                jsonBody: {
+                    success: true,
+                    packageName: GOOGLE_PLAY_PACKAGE_NAME,
+                    reviewCount: reviews.length,
+                    message: 'Google Play Developer API connection successful!'
+                }
+            };
+        } catch (error) {
+            return {
+                status: 500,
+                body: `Error: ${error.message}`
             };
         }
     }
