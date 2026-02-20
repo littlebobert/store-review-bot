@@ -10,6 +10,8 @@ const APP_STORE_PRIVATE_KEY = process.env.APP_STORE_PRIVATE_KEY;
 const APP_BUNDLE_ID = process.env.APP_ID; // e.g., jp.tech.kotoba.app
 const GOOGLE_PLAY_PACKAGE_NAME = process.env.GOOGLE_PLAY_PACKAGE_NAME; // e.g., com.example.app
 const GOOGLE_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+const GOOGLE_PLAY_DEVELOPER_ID = process.env.GOOGLE_PLAY_DEVELOPER_ID;
+const GOOGLE_PLAY_CONSOLE_APP_ID = process.env.GOOGLE_PLAY_CONSOLE_APP_ID;
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 const AZURE_STORAGE_ACCOUNT = process.env.AZURE_STORAGE_ACCOUNT;
 const AZURE_STORAGE_KEY = process.env.AZURE_STORAGE_KEY;
@@ -202,6 +204,7 @@ function mapGoogleReview(googleReview) {
     return {
         id: `google:${googleReview.reviewId}`,
         attributes: {
+            sourceReviewId: googleReview.reviewId,
             rating: userComment?.starRating || 0,
             title: '',
             body: userComment?.text || '',
@@ -212,8 +215,17 @@ function mapGoogleReview(googleReview) {
     };
 }
 
+function buildGooglePlayReviewUrl(reviewId) {
+    const fallbackUrl = `https://play.google.com/store/apps/details?id=${GOOGLE_PLAY_PACKAGE_NAME}&showAllReviews=true`;
+    if (!GOOGLE_PLAY_DEVELOPER_ID || !GOOGLE_PLAY_CONSOLE_APP_ID) {
+        return fallbackUrl;
+    }
+
+    return `https://play.google.com/console/developers/${GOOGLE_PLAY_DEVELOPER_ID}/app/${GOOGLE_PLAY_CONSOLE_APP_ID}/user-feedback/review-details?reviewId=${encodeURIComponent(reviewId)}&corpus=PUBLIC_REVIEWS`;
+}
+
 // Post review to Slack
-async function postToSlack(review, reviewUrl) {
+async function postToSlack(review, reviewUrl, linkText = 'View review source ->') {
     const { rating, title, body, reviewerNickname, territory, createdDate } = review.attributes;
     
     // Color based on rating
@@ -244,7 +256,7 @@ async function postToSlack(review, reviewUrl) {
                         type: 'section',
                         text: {
                             type: 'mrkdwn',
-                            text: `<${reviewUrl}|View review source →>`
+                            text: `<${reviewUrl}|${linkText}>`
                         }
                     }
                 ]
@@ -329,7 +341,7 @@ async function checkAndPostReviews(context, options = {}) {
     );
 
     for (const review of sortedReviews) {
-        await postToSlack(review, appStoreConnectUrl);
+        await postToSlack(review, appStoreConnectUrl, 'View in App Store Connect ->');
         
         // Mark as posted
         if (tableClient) {
@@ -397,10 +409,10 @@ async function checkAndPostGoogleReviews(context, options = {}) {
     const sortedReviews = newReviews.sort((a, b) =>
         new Date(a.attributes.createdDate) - new Date(b.attributes.createdDate)
     );
-    const googlePlayReviewUrl = `https://play.google.com/store/apps/details?id=${GOOGLE_PLAY_PACKAGE_NAME}&showAllReviews=true`;
-
     for (const review of sortedReviews) {
-        await postToSlack(review, googlePlayReviewUrl);
+        const reviewId = review.attributes.sourceReviewId || review.id.replace(/^google:/, '');
+        const googlePlayReviewUrl = buildGooglePlayReviewUrl(reviewId);
+        await postToSlack(review, googlePlayReviewUrl, 'View in Google Play Console ->');
 
         if (tableClient) {
             await markReviewPosted(tableClient, review);

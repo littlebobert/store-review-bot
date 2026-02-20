@@ -23,6 +23,8 @@ Edit `local.settings.json` with your credentials:
     "APP_ID": "jp.tech.kotoba.app",
     "GOOGLE_PLAY_PACKAGE_NAME": "com.example.app",
     "GOOGLE_SERVICE_ACCOUNT_JSON": "{\"type\":\"service_account\",\"project_id\":\"...\"}",
+    "GOOGLE_PLAY_DEVELOPER_ID": "7127907010285966296",
+    "GOOGLE_PLAY_CONSOLE_APP_ID": "4975367138904798133",
     "SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/...",
     "AZURE_STORAGE_ACCOUNT": "yourstorageaccount",
     "AZURE_STORAGE_KEY": "your_storage_key"
@@ -106,6 +108,8 @@ func azure functionapp publish store-review-bot
 # - APP_ID
 # - GOOGLE_PLAY_PACKAGE_NAME
 # - GOOGLE_SERVICE_ACCOUNT_JSON
+# - GOOGLE_PLAY_DEVELOPER_ID (optional, for deep links to individual Play reviews)
+# - GOOGLE_PLAY_CONSOLE_APP_ID (optional, for deep links to individual Play reviews)
 # - SLACK_WEBHOOK_URL
 # - AZURE_STORAGE_ACCOUNT
 # - AZURE_STORAGE_KEY
