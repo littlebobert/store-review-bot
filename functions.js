@@ -736,3 +736,146 @@ app.http('markAllPosted', {
         }
     }
 });
+
+// HTTP Trigger: Reset all Google Play reviews so they can be posted again
+app.http('resetAllGoogle', {
+    methods: ['GET', 'POST'],
+    authLevel: 'anonymous',
+    handler: async (request, context) => {
+        try {
+            if (!AZURE_STORAGE_ACCOUNT || !AZURE_STORAGE_KEY) {
+                return { status: 500, body: 'Azure Storage not configured' };
+            }
+
+            const googleReviews = await fetchGooglePlayReviews(context);
+            const reviews = googleReviews.map(mapGoogleReview);
+
+            const tableClient = getTableClient();
+            let resetCount = 0;
+            for (const review of reviews) {
+                try {
+                    await tableClient.deleteEntity('reviews', review.id);
+                    resetCount++;
+                } catch (e) {
+                    // Ignore missing entities
+                }
+            }
+
+            return {
+                status: 200,
+                jsonBody: {
+                    message: `Reset ${resetCount} Google Play reviews`,
+                    reset: resetCount
+                }
+            };
+        } catch (error) {
+            context.log('Error in resetAllGoogle:', error.message);
+            return { status: 500, body: `Error: ${error.message}` };
+        }
+    }
+});
+
+// HTTP Trigger: Reset latest Google Play review so it can be posted again
+app.http('resetLatestGoogle', {
+    methods: ['GET', 'POST'],
+    authLevel: 'anonymous',
+    handler: async (request, context) => {
+        try {
+            if (!AZURE_STORAGE_ACCOUNT || !AZURE_STORAGE_KEY) {
+                return { status: 500, body: 'Azure Storage not configured' };
+            }
+
+            const googleReviews = await fetchGooglePlayReviews(context);
+            const reviews = googleReviews.map(mapGoogleReview);
+            const sortedReviews = reviews.sort((a, b) =>
+                new Date(b.attributes.createdDate) - new Date(a.attributes.createdDate)
+            );
+            const latestReview = sortedReviews[0];
+
+            if (!latestReview) {
+                return { status: 200, jsonBody: { message: 'No Google Play reviews found' } };
+            }
+
+            const tableClient = getTableClient();
+            try {
+                await tableClient.deleteEntity('reviews', latestReview.id);
+                context.log(`Deleted Google Play review ${latestReview.id} from posted list`);
+            } catch (e) {
+                // Already not in table
+            }
+
+            return {
+                status: 200,
+                jsonBody: {
+                    message: 'Reset latest Google Play review',
+                    review: {
+                        id: latestReview.id,
+                        rating: latestReview.attributes.rating,
+                        body: latestReview.attributes.body,
+                        createdDate: latestReview.attributes.createdDate
+                    }
+                }
+            };
+        } catch (error) {
+            context.log('Error in resetLatestGoogle:', error.message);
+            return { status: 500, body: `Error: ${error.message}` };
+        }
+    }
+});
+
+// HTTP Trigger: Mark all Google Play reviews as posted (except most recent)
+app.http('markAllGooglePosted', {
+    methods: ['GET', 'POST'],
+    authLevel: 'anonymous',
+    handler: async (request, context) => {
+        try {
+            context.log('Marking all Google Play reviews as posted (except most recent)...');
+
+            if (!AZURE_STORAGE_ACCOUNT || !AZURE_STORAGE_KEY) {
+                return { status: 500, body: 'Azure Storage not configured' };
+            }
+
+            const googleReviews = await fetchGooglePlayReviews(context);
+            const reviews = googleReviews.map(mapGoogleReview);
+            context.log(`Fetched ${reviews.length} Google Play reviews`);
+
+            if (reviews.length === 0) {
+                return { status: 200, jsonBody: { message: 'No Google Play reviews found', marked: 0 } };
+            }
+
+            const sortedReviews = reviews.sort((a, b) =>
+                new Date(b.attributes.createdDate) - new Date(a.attributes.createdDate)
+            );
+            const reviewsToMark = sortedReviews.slice(1); // Skip first (most recent)
+
+            const tableClient = getTableClient();
+            await tableClient.createTable().catch(() => {});
+
+            let markedCount = 0;
+            for (const review of reviewsToMark) {
+                await markReviewPosted(tableClient, review);
+                markedCount++;
+            }
+
+            const skippedReview = sortedReviews[0];
+            context.log(`Marked ${markedCount} Google Play reviews as posted, skipped most recent: ${skippedReview.id}`);
+
+            return {
+                status: 200,
+                jsonBody: {
+                    message: `Marked ${markedCount} Google Play reviews as posted`,
+                    marked: markedCount,
+                    skipped: {
+                        id: skippedReview.id,
+                        rating: skippedReview.attributes.rating,
+                        body: skippedReview.attributes.body,
+                        createdDate: skippedReview.attributes.createdDate
+                    }
+                }
+            };
+        } catch (error) {
+            context.log('Error in markAllGooglePosted:', error.message);
+            return { status: 500, body: `Error: ${error.message}` };
+        }
+    }
+});

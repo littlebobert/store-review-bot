@@ -56,6 +56,9 @@ npm start
 - **Test Google Play API:** http://localhost:7071/api/testGooglePlay
 - **Preview Google Play reviews:** http://localhost:7071/api/previewGoogleReviews
 - **Trigger Google Play review post:** http://localhost:7071/api/triggerGoogleReviewCheck
+- **Reset latest Google Play review:** http://localhost:7071/api/resetLatestGoogle
+- **Reset all Google Play reviews:** http://localhost:7071/api/resetAllGoogle
+- **Mark all Google Play posted (except latest):** http://localhost:7071/api/markAllGooglePosted
 
 ## Endpoints
 
@@ -68,6 +71,9 @@ npm start
 | `/api/testGooglePlay` | GET | Verify Google Play Developer API credentials |
 | `/api/previewGoogleReviews` | GET | Fetch and preview Google Play reviews (doesn't post) |
 | `/api/triggerGoogleReviewCheck` | GET/POST | Fetch and post new Google Play reviews to Slack |
+| `/api/resetLatestGoogle` | GET/POST | Reset latest Google Play review to be posted again |
+| `/api/resetAllGoogle` | GET/POST | Reset all Google Play reviews to be posted again |
+| `/api/markAllGooglePosted` | GET/POST | Mark all Google Play reviews as posted (except most recent) |
 
 ## Scheduled Run
 
