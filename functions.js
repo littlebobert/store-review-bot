@@ -208,7 +208,7 @@ function mapGoogleReview(googleReview) {
             rating: userComment?.starRating || 0,
             title: '',
             body: userComment?.text || '',
-            reviewerNickname: 'Google Play User',
+            reviewerNickname: googleReview.authorName || 'Google Play User',
             territory: userComment?.reviewerLanguage || '',
             createdDate
         }
